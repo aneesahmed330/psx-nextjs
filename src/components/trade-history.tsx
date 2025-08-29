@@ -37,6 +37,7 @@ import {
 import { useTrades, useStocks, usePrices, api } from "@/lib/hooks";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
+import { Trade } from "@/types";
 import { format } from "date-fns";
 import {
   Filter,

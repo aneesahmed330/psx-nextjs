@@ -46,11 +46,11 @@ export async function GET(request: NextRequest) {
       }));
     } else {
       // Get all price history
-      prices = await pricesCollection
+      prices = (await pricesCollection
         .find(query)
         .sort({ fetched_at: -1 })
         .limit(1000)
-        .toArray();
+        .toArray()) as unknown as Price[];
     }
 
     return NextResponse.json({
@@ -92,5 +92,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-

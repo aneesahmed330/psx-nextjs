@@ -8,7 +8,9 @@ export async function GET() {
     const pricesCollection = await getCollection(COLLECTIONS.PRICES);
 
     // Get all trades
-    const trades = (await tradesCollection.find({}).toArray()) as Trade[];
+    const trades = (await tradesCollection
+      .find({})
+      .toArray()) as unknown as Trade[];
 
     if (trades.length === 0) {
       return NextResponse.json({
@@ -98,7 +100,7 @@ export async function GET() {
     const latestPricesResult = await pricesCollection
       .aggregate(pricesPipeline)
       .toArray();
-    latestPricesResult.forEach((priceDoc) => {
+    (latestPricesResult as any[]).forEach((priceDoc) => {
       latestPrices.set(priceDoc.symbol, {
         symbol: priceDoc.symbol,
         price: priceDoc.price,
