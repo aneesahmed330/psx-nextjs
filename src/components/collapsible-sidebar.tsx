@@ -25,8 +25,9 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { useStocks, useTrades, api } from "@/lib/hooks";
+import { useStocks, useTrades, usePortfolio, api } from "@/lib/hooks";
 import { useToast } from "@/hooks/use-toast";
+import { formatCurrency } from "@/lib/utils";
 import {
   Plus,
   Building2,
@@ -48,6 +49,7 @@ export function CollapsibleSidebar({
 }: CollapsibleSidebarProps) {
   const { stocks, mutate: mutateStocks } = useStocks(true);
   const { mutate: mutateTrades } = useTrades();
+  const { portfolio } = usePortfolio();
   const { toast } = useToast();
   const [isAddingTrade, setIsAddingTrade] = useState(false);
   const [isAddingAlert, setIsAddingAlert] = useState(false);
@@ -68,9 +70,63 @@ export function CollapsibleSidebar({
     min_price: "",
     max_price: "",
     enabled: true,
+    trade_type: "Sell" as "Buy" | "Sell",
+    quantity: "",
+    notes: "",
   });
 
   const stockSymbols = stocks?.map((s) => s.symbol) || [];
+
+  // Helper functions for alert calculations
+  const getCurrentPrice = (symbol: string) => {
+    if (!portfolio) return null;
+    const holding = portfolio.find((h) => h.symbol === symbol);
+    return holding?.latest_price || null;
+  };
+
+  const getAverageBuyPrice = (symbol: string) => {
+    if (!portfolio) return null;
+    const holding = portfolio.find((h) => h.symbol === symbol);
+    return holding?.avg_buy_price || null;
+  };
+
+  const getSharesHeld = (symbol: string) => {
+    if (!portfolio) return null;
+    const holding = portfolio.find((h) => h.symbol === symbol);
+    return holding?.shares_held || null;
+  };
+
+  // Calculate potential P&L for sell alerts
+  const calculatePotentialPnL = (
+    symbol: string,
+    alertPrice: number,
+    quantity: number
+  ) => {
+    const avgBuyPrice = getAverageBuyPrice(symbol);
+    if (!avgBuyPrice) return null;
+
+    const profitPerShare = alertPrice - avgBuyPrice;
+    const totalPnL = profitPerShare * quantity;
+    return { profitPerShare, totalPnL };
+  };
+
+  // Calculate new average buy price for buy alerts
+  const calculateNewAveragePrice = (
+    symbol: string,
+    alertPrice: number,
+    quantity: number
+  ) => {
+    const currentShares = getSharesHeld(symbol);
+    const avgBuyPrice = getAverageBuyPrice(symbol);
+    if (!currentShares || !avgBuyPrice) return null;
+
+    const currentTotalValue = currentShares * avgBuyPrice;
+    const newSharesValue = quantity * alertPrice;
+    const totalShares = currentShares + quantity;
+    const newAveragePrice = (currentTotalValue + newSharesValue) / totalShares;
+
+    return { newAveragePrice, totalShares };
+  };
 
   const handleAddStock = async () => {
     if (!newStock.trim()) return;
@@ -147,6 +203,9 @@ export function CollapsibleSidebar({
         max_price: parseFloat(alertForm.max_price),
         enabled: alertForm.enabled,
         trigger: false,
+        trade_type: alertForm.trade_type,
+        quantity: alertForm.quantity ? parseInt(alertForm.quantity) : undefined,
+        notes: alertForm.notes,
       });
 
       setAlertForm({
@@ -154,6 +213,9 @@ export function CollapsibleSidebar({
         min_price: "",
         max_price: "",
         enabled: true,
+        trade_type: "Sell",
+        quantity: "",
+        notes: "",
       });
       setIsAddingAlert(false);
 
@@ -408,14 +470,16 @@ export function CollapsibleSidebar({
                       Create Alert
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
+                  <DialogContent className="sm:max-w-lg bg-black border-gray-800 text-white">
                     <DialogHeader>
                       <DialogTitle>Create Price Alert</DialogTitle>
                       <DialogDescription>
-                        Get notified when a stock hits your target price
+                        Get notified when a stock hits your target price with
+                        trade planning
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
+                      {/* Symbol Selection */}
                       <div>
                         <Label htmlFor="alert_symbol">Symbol</Label>
                         <Select
@@ -437,6 +501,56 @@ export function CollapsibleSidebar({
                         </Select>
                       </div>
 
+                      {/* Current Price Display */}
+                      {alertForm.symbol && (
+                        <div className="grid grid-cols-3 gap-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">
+                              Current Price
+                            </Label>
+                            <div className="text-lg font-semibold">
+                              {(() => {
+                                const currentPrice = getCurrentPrice(
+                                  alertForm.symbol
+                                );
+                                return currentPrice
+                                  ? formatCurrency(currentPrice)
+                                  : "N/A";
+                              })()}
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">
+                              Avg Buy Price
+                            </Label>
+                            <div className="text-lg font-semibold">
+                              {(() => {
+                                const avgPrice = getAverageBuyPrice(
+                                  alertForm.symbol
+                                );
+                                return avgPrice
+                                  ? formatCurrency(avgPrice)
+                                  : "N/A";
+                              })()}
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">
+                              Shares Held
+                            </Label>
+                            <div className="text-lg font-semibold">
+                              {(() => {
+                                const sharesHeld = getSharesHeld(
+                                  alertForm.symbol
+                                );
+                                return sharesHeld ? sharesHeld : "N/A";
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Price Range */}
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <Label htmlFor="min_price">Min Price</Label>
@@ -475,6 +589,260 @@ export function CollapsibleSidebar({
                         </div>
                       </div>
 
+                      {/* Trade Type and Quantity */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="trade_type">Trade Type</Label>
+                          <Select
+                            value={alertForm.trade_type}
+                            onValueChange={(value: "Buy" | "Sell") =>
+                              setAlertForm((prev) => ({
+                                ...prev,
+                                trade_type: value,
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Sell">Sell</SelectItem>
+                              <SelectItem value="Buy">Buy</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="quantity">Quantity</Label>
+                          <Input
+                            id="quantity"
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder="Number of shares"
+                            value={alertForm.quantity}
+                            onChange={(e) =>
+                              setAlertForm((prev) => ({
+                                ...prev,
+                                quantity: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {/* Notes */}
+                      <div>
+                        <Label htmlFor="notes">Notes (Optional)</Label>
+                        <Input
+                          id="notes"
+                          placeholder="Add notes about this alert"
+                          value={alertForm.notes}
+                          onChange={(e) =>
+                            setAlertForm((prev) => ({
+                              ...prev,
+                              notes: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      {/* Smart Calculations Display */}
+                      {alertForm.symbol &&
+                        alertForm.min_price &&
+                        alertForm.max_price &&
+                        alertForm.quantity && (
+                          <div className="p-4 bg-gray-900/50 rounded-lg border border-gray-700">
+                            <h4 className="font-medium mb-3 text-sm">
+                              📊 Alert Analysis
+                            </h4>
+
+                            {(() => {
+                              const currentPrice = getCurrentPrice(
+                                alertForm.symbol
+                              );
+                              const minPrice = parseFloat(alertForm.min_price);
+                              const maxPrice = parseFloat(alertForm.max_price);
+                              const quantity = parseInt(alertForm.quantity);
+
+                              if (
+                                !currentPrice ||
+                                !minPrice ||
+                                !maxPrice ||
+                                !quantity
+                              )
+                                return null;
+
+                              if (alertForm.trade_type === "Sell") {
+                                // Sell Alert Analysis
+                                const targetPrice = maxPrice; // Sell at max price
+                                const pnlInfo = calculatePotentialPnL(
+                                  alertForm.symbol,
+                                  targetPrice,
+                                  quantity
+                                );
+
+                                if (!pnlInfo)
+                                  return (
+                                    <div className="text-muted-foreground text-sm">
+                                      Insufficient data for calculation
+                                    </div>
+                                  );
+
+                                const percentageChange =
+                                  ((targetPrice - currentPrice) /
+                                    currentPrice) *
+                                  100;
+                                const isProfitable = pnlInfo.totalPnL > 0;
+
+                                return (
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span>Price needs to go:</span>
+                                      <span
+                                        className={`font-medium ${
+                                          percentageChange > 0
+                                            ? "text-green-600"
+                                            : "text-red-600"
+                                        }`}
+                                      >
+                                        {percentageChange > 0 ? "↑" : "↓"}{" "}
+                                        {Math.abs(percentageChange).toFixed(1)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Profit per share:</span>
+                                      <span
+                                        className={`font-medium ${
+                                          isProfitable
+                                            ? "text-green-600"
+                                            : "text-red-600"
+                                        }`}
+                                      >
+                                        {formatCurrency(pnlInfo.profitPerShare)}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Total P&L:</span>
+                                      <span
+                                        className={`font-medium ${
+                                          isProfitable
+                                            ? "text-green-600"
+                                            : "text-red-600"
+                                        }`}
+                                      >
+                                        {formatCurrency(pnlInfo.totalPnL)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              } else {
+                                // Buy Alert Analysis
+                                const targetPrice = minPrice; // Buy at min price
+                                const avgInfo = calculateNewAveragePrice(
+                                  alertForm.symbol,
+                                  targetPrice,
+                                  quantity
+                                );
+
+                                if (!avgInfo)
+                                  return (
+                                    <div className="text-muted-foreground text-sm">
+                                      Insufficient data for calculation
+                                    </div>
+                                  );
+
+                                const percentageChange =
+                                  ((targetPrice - currentPrice) /
+                                    currentPrice) *
+                                  100;
+
+                                return (
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span>Price needs to go:</span>
+                                      <span
+                                        className={`font-medium ${
+                                          percentageChange > 0
+                                            ? "text-green-600"
+                                            : "text-red-600"
+                                        }`}
+                                      >
+                                        {percentageChange > 0 ? "↑" : "↓"}{" "}
+                                        {Math.abs(percentageChange).toFixed(1)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>New avg buy price:</span>
+                                      <span className="font-medium text-blue-600">
+                                        {formatCurrency(
+                                          avgInfo.newAveragePrice
+                                        )}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Total shares after:</span>
+                                      <span className="font-medium text-blue-600">
+                                        {avgInfo.totalShares}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                            })()}
+                          </div>
+                        )}
+
+                      {/* Validation Messages */}
+                      {(() => {
+                        const errors = [];
+                        if (
+                          alertForm.symbol &&
+                          alertForm.min_price &&
+                          alertForm.max_price
+                        ) {
+                          const minPrice = parseFloat(alertForm.min_price);
+                          const maxPrice = parseFloat(alertForm.max_price);
+
+                          if (minPrice >= maxPrice) {
+                            errors.push(
+                              "Min price must be less than max price"
+                            );
+                          }
+
+                          if (alertForm.quantity) {
+                            const quantity = parseInt(alertForm.quantity);
+                            const sharesHeld = getSharesHeld(alertForm.symbol);
+
+                            if (
+                              alertForm.trade_type === "Sell" &&
+                              sharesHeld &&
+                              quantity > sharesHeld
+                            ) {
+                              errors.push(
+                                `Cannot sell more shares than you own (${sharesHeld})`
+                              );
+                            }
+                          }
+                        }
+
+                        if (errors.length > 0) {
+                          return (
+                            <div className="p-3 bg-red-950/30 border border-red-800 rounded-lg">
+                              {errors.map((error, index) => (
+                                <div
+                                  key={index}
+                                  className="text-red-400 text-sm"
+                                >
+                                  ⚠️ {error}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+
                       <div className="flex justify-end space-x-2">
                         <Button
                           variant="outline"
@@ -482,7 +850,17 @@ export function CollapsibleSidebar({
                         >
                           Cancel
                         </Button>
-                        <Button onClick={handleAddAlert}>Create Alert</Button>
+                        <Button
+                          onClick={handleAddAlert}
+                          disabled={
+                            !alertForm.symbol ||
+                            !alertForm.min_price ||
+                            !alertForm.max_price ||
+                            !alertForm.quantity
+                          }
+                        >
+                          Create Alert
+                        </Button>
                       </div>
                     </div>
                   </DialogContent>

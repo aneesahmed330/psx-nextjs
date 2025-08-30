@@ -27,6 +27,9 @@ export interface Alert {
   max_price: number;
   enabled: boolean;
   trigger: boolean;
+  trade_type?: "Buy" | "Sell";
+  quantity?: number;
+  notes?: string;
 }
 
 export interface Stock {
