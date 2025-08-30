@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useAlerts, api } from "@/lib/hooks";
+import { useAlerts, usePortfolio, api } from "@/lib/hooks";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
 import { Bell, BellOff, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
@@ -36,6 +36,37 @@ export function AlertsManagement() {
   const { toast } = useToast();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [alertToDelete, setAlertToDelete] = useState<Alert | null>(null);
+
+  // Get portfolio data to show current prices
+  const { portfolio } = usePortfolio();
+
+  // Helper function to get current price for a symbol
+  const getCurrentPrice = (symbol: string) => {
+    if (!portfolio) return null;
+    const holding = portfolio.find((h) => h.symbol === symbol);
+    return holding?.latest_price || null;
+  };
+
+  // Helper function to calculate percentage from range
+  const calculatePercentageFromRange = (
+    currentPrice: number,
+    minPrice: number,
+    maxPrice: number
+  ) => {
+    if (currentPrice >= minPrice && currentPrice <= maxPrice) {
+      return { value: 0, status: "within" }; // Within range
+    }
+
+    if (currentPrice < minPrice) {
+      // Below min price
+      const percentage = ((minPrice - currentPrice) / minPrice) * 100;
+      return { value: percentage, status: "below" };
+    } else {
+      // Above max price
+      const percentage = ((currentPrice - maxPrice) / maxPrice) * 100;
+      return { value: percentage, status: "above" };
+    }
+  };
 
   const handleToggleAlert = async (alert: Alert) => {
     try {
@@ -177,7 +208,7 @@ export function AlertsManagement() {
     <div className="space-y-6">
       {/* Alert Statistics - Moved to top */}
       {alerts && alerts.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
@@ -215,6 +246,30 @@ export function AlertsManagement() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Outside Range
+              </CardTitle>
+              <AlertTriangle className="h-4 w-4 text-orange-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-500">
+                {(() => {
+                  if (!portfolio) return 0;
+                  return alerts.filter((alert) => {
+                    const currentPrice = getCurrentPrice(alert.symbol);
+                    if (currentPrice === null) return false;
+                    return (
+                      currentPrice < alert.min_price ||
+                      currentPrice > alert.max_price
+                    );
+                  }).length;
+                })()}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -226,7 +281,8 @@ export function AlertsManagement() {
             <span>Price Alerts</span>
           </CardTitle>
           <CardDescription>
-            Manage your price alerts and notifications
+            Manage your price alerts and notifications. The Percentage column
+            shows how far the current price is from your alert range.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -243,6 +299,12 @@ export function AlertsManagement() {
                     </TableHead>
                     <TableHead className="font-medium p-3 text-sm">
                       Price Range
+                    </TableHead>
+                    <TableHead className="font-medium p-3 text-sm">
+                      Latest Price
+                    </TableHead>
+                    <TableHead className="font-medium p-3 text-sm">
+                      Percentage
                     </TableHead>
                     <TableHead className="font-medium p-3 text-sm">
                       Actions
@@ -279,8 +341,83 @@ export function AlertsManagement() {
                         </div>
                       </TableCell>
                       <TableCell className="p-3">
-                        Below {formatCurrency(alert.min_price)} or above{" "}
+                        {formatCurrency(alert.min_price)} -{" "}
                         {formatCurrency(alert.max_price)}
+                      </TableCell>
+                      <TableCell className="p-3">
+                        {(() => {
+                          const currentPrice = getCurrentPrice(alert.symbol);
+                          if (currentPrice === null) {
+                            return (
+                              <span className="text-muted-foreground">N/A</span>
+                            );
+                          }
+                          return (
+                            <span className="font-medium">
+                              {formatCurrency(currentPrice)}
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell className="p-3">
+                        {(() => {
+                          const currentPrice = getCurrentPrice(alert.symbol);
+                          if (currentPrice === null) {
+                            return (
+                              <span className="text-muted-foreground">N/A</span>
+                            );
+                          }
+
+                          const percentageInfo = calculatePercentageFromRange(
+                            currentPrice,
+                            alert.min_price,
+                            alert.max_price
+                          );
+
+                          if (percentageInfo.status === "within") {
+                            return (
+                              <div className="flex items-center space-x-1">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                <span className="text-green-600 font-medium">
+                                  Within Range
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          const color =
+                            percentageInfo.status === "below"
+                              ? "text-red-600"
+                              : "text-orange-600";
+                          const bgColor =
+                            percentageInfo.status === "below"
+                              ? "bg-red-500"
+                              : "bg-orange-500";
+                          const icon =
+                            percentageInfo.status === "below" ? "↓" : "↑";
+                          const tooltip =
+                            percentageInfo.status === "below"
+                              ? `${percentageInfo.value.toFixed(
+                                  1
+                                )}% below minimum price`
+                              : `${percentageInfo.value.toFixed(
+                                  1
+                                )}% above maximum price`;
+
+                          return (
+                            <div
+                              className="flex items-center space-x-1"
+                              title={tooltip}
+                            >
+                              <div
+                                className={`w-2 h-2 ${bgColor} rounded-full`}
+                              ></div>
+                              <span className={`${color} font-medium`}>
+                                {icon} {percentageInfo.value.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="p-3">
                         <div className="flex items-center space-x-2">
